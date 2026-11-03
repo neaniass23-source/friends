@@ -54,7 +54,7 @@ public class Friends {
     private final Path dataDir;
 
     // ---- configuracion ----
-    private String lobbyServer = "lobby";
+    private Set<String> notifyServers = new HashSet<>(Set.of("lobby"));
     private String joinSound = "entity.experience_orb.pickup";
     private String requestSound = "block.note_block.pling";
 
@@ -91,16 +91,17 @@ public class Friends {
                 .plugin(this)
                 .build();
         server.getCommandManager().register(meta, new FriendCommand());
-        logger.info("Friends cargado. Lobby = '{}'", lobbyServer);
+        logger.info("Friends cargado. Servidores con aviso: {}", notifyServers);
     }
 
     private void loadConfig() {
         Path file = dataDir.resolve("config.properties");
         try {
             if (!Files.exists(file)) {
-                String def = "# Nombre del servidor lobby tal como aparece en velocity.toml\n"
-                        + "lobby-server=lobby\n"
-                        + "# Sonido cuando un amigo entra al lobby (1.19.3+)\n"
+                String def = "# Servidores que avisan a tus amigos cuando alguien entra (separados por comas,\n"
+                        + "# con el nombre exacto de velocity.toml)\n"
+                        + "notify-servers=lobby,survival\n"
+                        + "# Sonido cuando un amigo entra a uno de esos servidores (1.19.3+)\n"
                         + "join-sound=entity.experience_orb.pickup\n"
                         + "# Sonido cuando recibes una solicitud de amistad\n"
                         + "request-sound=block.note_block.pling\n";
@@ -110,7 +111,11 @@ public class Friends {
             try (Reader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
                 p.load(r);
             }
-            lobbyServer = p.getProperty("lobby-server", lobbyServer).trim();
+            String list = p.getProperty("notify-servers", p.getProperty("lobby-server", "lobby"));
+            notifyServers = new HashSet<>();
+            for (String name : list.split(",")) {
+                if (!name.isBlank()) notifyServers.add(name.trim().toLowerCase(Locale.ROOT));
+            }
             joinSound = p.getProperty("join-sound", joinSound).trim();
             requestSound = p.getProperty("request-sound", requestSound).trim();
         } catch (IOException e) {
@@ -197,10 +202,10 @@ public class Friends {
         Optional<ServerConnection> cur = joined.getCurrentServer();
         if (cur.isEmpty()) return;
         String serverName = cur.get().getServerInfo().getName();
-        if (!serverName.equalsIgnoreCase(lobbyServer)) return;
+        if (!notifyServers.contains(serverName.toLowerCase(Locale.ROOT))) return;
 
         RegisteredServer prev = event.getPreviousServer();
-        if (prev != null && prev.getServerInfo().getName().equalsIgnoreCase(lobbyServer)) return;
+        if (prev != null && prev.getServerInfo().getName().equalsIgnoreCase(serverName)) return;
 
         Set<UUID> myFriends;
         synchronized (this) {
@@ -210,12 +215,12 @@ public class Friends {
             server.getPlayer(id).ifPresent(friend -> {
                 // Si ya esta en el mismo servidor, no hace falta avisar
                 boolean sameServer = friend.getCurrentServer()
-                        .map(c -> c.getServerInfo().getName().equalsIgnoreCase(lobbyServer))
+                        .map(c -> c.getServerInfo().getName().equalsIgnoreCase(serverName))
                         .orElse(false);
                 if (sameServer) return;
                 friend.sendMessage(prefix()
                         .append(Component.text(joined.getUsername(), NamedTextColor.GREEN, TextDecoration.BOLD))
-                        .append(Component.text(" ha entrado al " + lobbyServer + ". ", NamedTextColor.YELLOW))
+                        .append(Component.text(" ha entrado a " + serverName + ". ", NamedTextColor.YELLOW))
                         .append(button("Ir con él", NamedTextColor.GREEN, "/friend join " + joined.getUsername(),
                                 "Click para ir con " + joined.getUsername())));
                 playSound(friend, joinSound, 1.2f);
